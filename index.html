@@ -68,7 +68,7 @@
 
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-        let pdfDoc = null, pageNum = 1;
+        let pdfDoc = null, pageNum = 1, renderTask = null;
         const canvas = document.getElementById('pdf-canvas'), ctx = canvas.getContext('2d');
         const textLayer = document.getElementById('text-layer'), statusDiv = document.getElementById('status');
         const container = document.getElementById('viewer-container');
@@ -83,14 +83,27 @@
             const viewport = page.getViewport({ scale: scale });
             canvas.height = viewport.height;
             canvas.width = viewport.width;
-            await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+
+            // 前回のレンダリングタスクがあればキャンセル
+            if (renderTask) {
+                renderTask.cancel();
+            }
+
+            renderTask = page.render({ canvasContext: ctx, viewport: viewport });
+            
+            try {
+                await renderTask.promise;
+            } catch (err) {
+                if (err.name === 'RenderingCancelledException') return;
+                throw err;
+            }
 
             statusDiv.textContent = "OCR文字認識中...";
             const dataUrl = canvas.toDataURL('image/jpeg');
             const { data: { lines } } = await Tesseract.recognize(dataUrl, 'jpn');
 
             textLayer.innerHTML = '';
-            lines.forEach(line => {
+            lines.forEach((line, index) => {
                 const span = document.createElement('span');
                 const bbox = line.bbox;
                 span.style.left = bbox.x0 + 'px';
@@ -100,8 +113,9 @@
                 
                 span.onclick = (e) => {
                     e.stopPropagation();
+                    const textToRead = extractSentence(line.text, index, lines);
                     window.speechSynthesis.cancel();
-                    const utterance = new SpeechSynthesisUtterance(line.text);
+                    const utterance = new SpeechSynthesisUtterance(textToRead);
                     utterance.lang = 'ja-JP';
                     utterance.onstart = () => stopBtn.classList.remove('hidden');
                     utterance.onend = () => stopBtn.classList.add('hidden');
@@ -111,6 +125,15 @@
             });
             statusDiv.textContent = `ページ ${num} 完了`;
             document.getElementById('page-info').textContent = `${pageNum} / ${pdfDoc.numPages}`;
+        }
+
+        function extractSentence(clickedLineText, lineIndex, allLines) {
+            let fullText = "";
+            for(let i = lineIndex; i < allLines.length; i++) {
+                fullText += allLines[i].text;
+            }
+            const match = fullText.match(/^.*?[。．！？!?]/);
+            return match ? match[0] : fullText;
         }
 
         stopBtn.onclick = () => {
