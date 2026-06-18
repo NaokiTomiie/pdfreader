@@ -39,12 +39,32 @@
         <h1 class="text-lg font-medium">OCR対応 PDF リーダー</h1>
         <div class="flex items-center gap-4">
             <button id="stop-btn" class="hidden bg-red-600 text-white px-4 py-2 rounded shadow-material hover:bg-red-700 transition-all text-sm font-medium">読み上げ停止</button>
+            
+            <!-- 横書き/縦書き 切り替えボタン -->
+            <div class="flex items-center bg-surface rounded shadow-material p-1">
+                <button id="mode-horizontal" class="px-3 py-1.5 text-sm font-medium rounded transition-colors bg-primary text-white">横書き</button>
+                <button id="mode-vertical" class="px-3 py-1.5 text-sm font-medium rounded transition-colors text-primary hover:bg-gray-100">縦書き</button>
+            </div>
+
             <input type="file" id="file-input" accept="application/pdf" class="hidden">
             <label for="file-input" class="cursor-pointer bg-surface text-primary px-4 py-2 rounded shadow-material hover:bg-gray-100 transition-all font-medium text-sm">PDFを開く</label>
         </div>
     </header>
 
     <main class="flex-grow flex flex-col items-center p-2 gap-2 overflow-hidden">
+        
+        <!-- 起動時の初期メッセージ -->
+        <div id="initial-message" class="flex flex-col items-center justify-center flex-grow w-full">
+            <div class="bg-surface p-8 rounded-lg shadow-material max-w-lg text-center border-t-4 border-primaryLight">
+                <svg class="w-16 h-16 text-primaryLight mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+                <p class="text-xl text-primaryDark font-medium mb-3">セキュアなローカル処理</p>
+                <p class="text-sm text-gray-600 leading-relaxed text-left">
+                    読み込んだファイルは外部サーバーに送信されません。<br>
+                    すべてブラウザ内で処理されるので、テスト等にも安心して使用できます。
+                </p>
+            </div>
+        </div>
+
         <div id="controls" class="hidden flex flex-wrap gap-4 items-center bg-surface px-4 py-2 rounded shadow-material">
             <button id="prev" class="bg-background hover:bg-gray-200 px-3 py-1 rounded transition-colors">前へ</button>
             <span id="page-info" class="text-sm font-medium w-20 text-center">1 / 1</span>
@@ -69,13 +89,50 @@
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
         let pdfDoc = null, pageNum = 1, renderTask = null;
+        let currentOcrLang = 'jpn'; // 初期値は横書き
+        
         const canvas = document.getElementById('pdf-canvas'), ctx = canvas.getContext('2d');
         const textLayer = document.getElementById('text-layer'), statusDiv = document.getElementById('status');
         const container = document.getElementById('viewer-container');
         const stopBtn = document.getElementById('stop-btn');
         const scaleSlider = document.getElementById('scale-slider');
+        const initialMessage = document.getElementById('initial-message');
+        
+        // 縦書き・横書きボタンの要素
+        const btnHorizontal = document.getElementById('mode-horizontal');
+        const btnVertical = document.getElementById('mode-vertical');
+
+        // ボタンの見た目を更新する関数
+        function updateModeButtons() {
+            if (currentOcrLang === 'jpn') {
+                btnHorizontal.className = 'px-3 py-1.5 text-sm font-medium rounded transition-colors bg-primary text-white';
+                btnVertical.className = 'px-3 py-1.5 text-sm font-medium rounded transition-colors text-primary hover:bg-gray-100';
+            } else {
+                btnVertical.className = 'px-3 py-1.5 text-sm font-medium rounded transition-colors bg-primary text-white';
+                btnHorizontal.className = 'px-3 py-1.5 text-sm font-medium rounded transition-colors text-primary hover:bg-gray-100';
+            }
+        }
+
+        // モード切り替えイベント
+        btnHorizontal.onclick = () => {
+            if (currentOcrLang !== 'jpn') {
+                currentOcrLang = 'jpn';
+                updateModeButtons();
+                if (pdfDoc) renderPage(pageNum); // 開いていれば再レンダリング(再OCR)
+            }
+        };
+
+        btnVertical.onclick = () => {
+            if (currentOcrLang !== 'jpn_vert') {
+                currentOcrLang = 'jpn_vert';
+                updateModeButtons();
+                if (pdfDoc) renderPage(pageNum); // 開いていれば再レンダリング(再OCR)
+            }
+        };
 
         async function renderPage(num) {
+            if (!pdfDoc || num < 1 || num > pdfDoc.numPages) return;
+
             statusDiv.textContent = `ページ ${num} をレンダリング中...`;
             const page = await pdfDoc.getPage(num);
             const scale = parseFloat(scaleSlider.value);
@@ -98,18 +155,49 @@
                 throw err;
             }
 
-            statusDiv.textContent = "OCR文字認識中...";
+            statusDiv.textContent = currentOcrLang === 'jpn' ? "OCR文字認識中... (横書き)" : "OCR文字認識中... (縦書き 初回はデータDLに時間がかかります)";
             const dataUrl = canvas.toDataURL('image/jpeg');
-            const { data: { lines } } = await Tesseract.recognize(dataUrl, 'jpn');
+            
+            // OCR処理：Workerを用いてページセグメンテーションモード(PSM)を切り替える
+            const worker = await Tesseract.createWorker(currentOcrLang);
+            await worker.setParameters({
+                // 5: 縦書きブロックを想定, 3: 自動ページセグメンテーション(横書き向き)
+                tessedit_pageseg_mode: currentOcrLang === 'jpn_vert' ? '5' : '3'
+            });
+            const { data: { lines } } = await worker.recognize(dataUrl);
+            await worker.terminate();
+
+            // 読み上げ順序を正しくするため、モードに応じて行の位置をソート
+            lines.sort((a, b) => {
+                if (currentOcrLang === 'jpn_vert') {
+                    // 縦書き: 右から左 (X1の降順)、同じ列なら上から下 (Y0の昇順)
+                    if (Math.abs(b.bbox.x1 - a.bbox.x1) > 10) {
+                        return b.bbox.x1 - a.bbox.x1;
+                    }
+                    return a.bbox.y0 - b.bbox.y0;
+                } else {
+                    // 横書き: 上から下 (Y0の昇順)、同じ行なら左から右 (X0の昇順)
+                    if (Math.abs(a.bbox.y0 - b.bbox.y0) > 10) {
+                        return a.bbox.y0 - b.bbox.y0;
+                    }
+                    return a.bbox.x0 - b.bbox.x0;
+                }
+            });
 
             textLayer.innerHTML = '';
             lines.forEach((line, index) => {
+                // Tesseractで空の行が認識された場合はスキップ
+                if (!line.text.trim()) return;
+
                 const span = document.createElement('span');
                 const bbox = line.bbox;
                 span.style.left = bbox.x0 + 'px';
                 span.style.top = bbox.y0 + 'px';
                 span.style.width = (bbox.x1 - bbox.x0) + 'px';
                 span.style.height = (bbox.y1 - bbox.y0) + 'px';
+                
+                // カーソルも縦書き・横書きに合わせてテキスト選択風にする
+                span.style.cursor = currentOcrLang === 'jpn_vert' ? 'vertical-text' : 'text';
                 
                 span.onclick = (e) => {
                     e.stopPropagation();
@@ -148,8 +236,13 @@
         document.getElementById('file-input').addEventListener('change', async (e) => {
             const file = e.target.files[0];
             if(!file) return;
+            
+            // ファイル読み込み時に初期メッセージを隠す
+            initialMessage.classList.add('hidden');
+            
             const pdf = await pdfjsLib.getDocument(await file.arrayBuffer()).promise;
             pdfDoc = pdf;
+            pageNum = 1;
             container.classList.remove('hidden');
             document.getElementById('controls').classList.remove('hidden');
             renderPage(pageNum);
