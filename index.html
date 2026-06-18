@@ -164,12 +164,11 @@
             let orderedLines = [];
 
             if (currentOcrLang === 'jpn') {
-                // 横書きの場合：Tesseractのブロック解析機能を利用し、段組み・段落構造を維持する
+                // 横書きの場合：Tesseractのブロック解析機能を利用し、段組み構造(左列→右列など)を維持する
                 if (result.data.blocks) {
                     result.data.blocks.forEach(block => {
                         block.paragraphs.forEach(para => {
-                            para.lines.forEach((line, index) => {
-                                line.isParagraphStart = (index === 0); // 段落の先頭フラグ
+                            para.lines.forEach(line => {
                                 orderedLines.push(line);
                             });
                         });
@@ -186,21 +185,6 @@
                         return a.bbox.y0 - b.bbox.y0; // 上段を先に
                     }
                     return b.bbox.x1 - a.bbox.x1; // 同じ段なら右から左へ
-                });
-
-                // 縦書き用：段が大きく変わるか、行間が広い場合に段落開始とする
-                orderedLines.forEach((line, i) => {
-                    if (i === 0) {
-                        line.isParagraphStart = true;
-                    } else {
-                        let prev = orderedLines[i-1];
-                        let dy = line.bbox.y0 - prev.bbox.y0;
-                        if (Math.abs(dy) > yThreshold) {
-                            line.isParagraphStart = true;
-                        } else {
-                            line.isParagraphStart = false;
-                        }
-                    }
                 });
             }
 
@@ -237,38 +221,10 @@
             let clickPosStart = 0;
             
             for(let i = 0; i < allLines.length; i++) {
-                let currLine = allLines[i];
-                // 日本語文字間に入った不自然なスペースを詰める
-                let text = currLine.text.replace(/([ぁ-んァ-ヶー一-龠])\s+([ぁ-んァ-ヶー一-龠])/g, '$1$2').trim();
+                // 日本語文字間に入った不自然なスペースを詰める（改行由来の分断を修正）
+                let text = allLines[i].text.replace(/([ぁ-んァ-ヶー一-龠])\s+([ぁ-んァ-ヶー一-龠])/g, '$1$2').trim();
                 
                 if (!text) continue;
-
-                if (i > 0) {
-                    let prevLine = allLines[i-1];
-                    let isNewParagraph = currLine.isParagraphStart;
-                    
-                    // 行間からの推測 (OCR情報だけでは不足している場合のフォールバック)
-                    if (!isNewParagraph) {
-                        if (currentOcrLang === 'jpn') {
-                            let prevHeight = prevLine.bbox.y1 - prevLine.bbox.y0;
-                            // 横書き: Y座標のギャップが前の行の高さの50%以上あれば段落区切り（改行）とみなす
-                            if (currLine.bbox.y0 - prevLine.bbox.y1 > prevHeight * 0.5) {
-                                isNewParagraph = true;
-                            }
-                        } else {
-                            let prevWidth = prevLine.bbox.x1 - prevLine.bbox.x0;
-                            // 縦書き: X座標のギャップが前の行の幅の50%以上あれば段落区切りとみなす
-                            if (prevLine.bbox.x0 - currLine.bbox.x1 > prevWidth * 0.5) {
-                                isNewParagraph = true;
-                            }
-                        }
-                    }
-
-                    // 改行判定された場合は、行の間に改行コード(\n)を挿入する
-                    if (isNewParagraph) {
-                        fullText += "\n";
-                    }
-                }
 
                 // クリックした行が、連結された全文のどの位置から始まるかを記録
                 if (i === clickedIndex) {
@@ -277,25 +233,25 @@
                 fullText += text;
             }
 
-            // クリックした場所から前に遡って、前の文の終わり（句点 または 改行）を探す
+            // クリックした場所から前に遡って、前の文の終わり（句点）を探す
             let startPos = 0;
             for (let i = clickPosStart - 1; i >= 0; i--) {
-                if (/[。．！？!?\n]/.test(fullText[i])) {
-                    startPos = i + 1; // 句点・改行の次の文字が、現在の文の先頭
+                if (/[。．！？!?]/.test(fullText[i])) {
+                    startPos = i + 1; // 句点の次の文字が、現在の文の先頭
                     break;
                 }
             }
             
-            // クリックした場所から後ろに進んで、現在の文の終わり（句点 または 改行）を探す
+            // クリックした場所から後ろに進んで、現在の文の終わり（句点）を探す
             let endPos = fullText.length;
             for (let i = clickPosStart; i < fullText.length; i++) {
-                if (/[。．！？!?\n]/.test(fullText[i])) {
-                    endPos = i + 1; // 句点・改行を含める
+                if (/[。．！？!?]/.test(fullText[i])) {
+                    endPos = i + 1; // 句点を含める
                     break;
                 }
             }
             
-            // 文の先頭から句点（または改行）までを抽出して返す
+            // 文の先頭から句点までを抽出して返す
             return fullText.substring(startPos, endPos).trim();
         }
 
