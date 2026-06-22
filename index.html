@@ -1,285 +1,545 @@
 <!DOCTYPE html>
-<html lang="ja" class="h-full">
+<html lang="ja">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OCR対応 PDF リーダー</title>
-    
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        primary: '#455A64',
-                        primaryLight: '#78909C',
-                        primaryDark: '#263238',
-                        background: '#ECEFF1',
-                        surface: '#FFFFFF',
-                        onSurface: '#37474F',
-                    },
-                    boxShadow: { 'material': '0 2px 2px 0 rgba(0,0,0,0.14), 0 3px 1px -2px rgba(0,0,0,0.12), 0 1px 5px 0 rgba(0,0,0,0.20)' }
-                }
-            }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDF AI リーダー (OCR内蔵)</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- PDF.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <!-- Tesseract.js -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: '#00695c', // Teal 800 - 落ち着いた色合い
+            primaryLight: '#4db6ac', // Teal 300
+            primaryDark: '#004d40', // Teal 900
+            surface: '#f8fafc', // Slate 50
+            surfaceDark: '#e2e8f0', // Slate 200
+            textMain: '#1e293b', // Slate 800
+          }
         }
-    </script>
-    
-    <style>
-        .textLayer { position: absolute; left: 0; top: 0; right: 0; bottom: 0; pointer-events: none; z-index: 10; }
-        .textLayer > span { position: absolute; cursor: pointer; border-radius: 3px; pointer-events: auto; background-color: rgba(255, 255, 255, 0.01); }
-        .textLayer > span:hover { background-color: rgba(69, 90, 100, 0.3) !important; }
-    </style>
+      }
+    }
+  </script>
+  <style>
+    /* マテリアルデザイン風のスライダー調整 */
+    input[type=range] {
+      -webkit-appearance: none;
+      background: transparent;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      height: 16px;
+      width: 16px;
+      border-radius: 50%;
+      background: #00695c;
+      cursor: pointer;
+      margin-top: -6px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    }
+    input[type=range]::-webkit-slider-runnable-track {
+      width: 100%;
+      height: 4px;
+      cursor: pointer;
+      background: #cbd5e1;
+      border-radius: 2px;
+    }
+    /* スクロールバーのカスタマイズ */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #f1f1f1; 
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #c1c1c1; 
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #a8a8a8; 
+    }
+  </style>
 </head>
-<body class="bg-background text-onSurface font-sans h-full flex flex-col overflow-hidden">
+<body class="bg-surface text-textMain flex flex-col h-screen overflow-hidden font-sans selection:bg-primaryLight selection:text-white">
 
-    <header class="bg-primary text-white shadow-material py-3 px-6 flex justify-between items-center z-20 shrink-0">
-        <h1 class="text-lg font-medium">OCR対応 PDF リーダー</h1>
-        <div class="flex items-center gap-4">
-            <button id="stop-btn" class="hidden bg-red-600 text-white px-4 py-2 rounded shadow-material hover:bg-red-700 transition-all text-sm font-medium">読み上げ停止</button>
-            
-            <!-- 横書き/縦書き 切り替えボタン -->
-            <div class="flex items-center bg-surface rounded shadow-material p-1">
-                <button id="mode-horizontal" class="px-3 py-1.5 text-sm font-medium rounded transition-colors bg-primary text-white">横書き</button>
-                <button id="mode-vertical" class="px-3 py-1.5 text-sm font-medium rounded transition-colors text-primary hover:bg-gray-100">縦書き</button>
-            </div>
+  <!-- 初期案内モーダル -->
+  <div id="initial-modal" class="fixed inset-0 bg-slate-900 bg-opacity-60 flex items-center justify-center z-50 backdrop-blur-sm transition-opacity duration-300">
+    <div class="bg-white rounded-xl shadow-2xl p-8 max-w-lg w-full mx-4 transform transition-transform duration-300 scale-100">
+      <div class="flex items-center gap-3 mb-4 text-primary">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+        <h2 class="text-2xl font-bold">プライバシーに関するお知らせ</h2>
+      </div>
+      <p class="text-slate-600 leading-relaxed text-lg mb-8">
+        読み込んだファイルは外部サーバーに送信されません。<br>
+        すべてブラウザ内で処理されるので、テスト等にも安心して使用できます。
+      </p>
+      <div class="flex justify-end">
+        <button onclick="document.getElementById('initial-modal').style.display='none'" class="px-6 py-2.5 bg-primary text-white font-medium rounded-lg shadow-md hover:bg-primaryDark hover:shadow-lg transition-all active:scale-95">
+          確認して始める
+        </button>
+      </div>
+    </div>
+  </div>
 
-            <input type="file" id="file-input" accept="application/pdf" class="hidden">
-            <label for="file-input" class="cursor-pointer bg-surface text-primary px-4 py-2 rounded shadow-material hover:bg-gray-100 transition-all font-medium text-sm">PDFを開く</label>
+  <!-- ローディングオーバーレイ -->
+  <div id="loading-overlay" class="fixed inset-0 bg-slate-900 bg-opacity-80 flex flex-col items-center justify-center z-40 hidden backdrop-blur-sm">
+    <div class="relative w-20 h-20 mb-6">
+      <div class="absolute inset-0 border-4 border-slate-600 rounded-full"></div>
+      <div class="absolute inset-0 border-4 border-primaryLight rounded-full border-t-transparent animate-spin"></div>
+    </div>
+    <div id="loading-text" class="text-xl font-medium text-white tracking-wide">OCRモデルをロード中...</div>
+    <div id="loading-progress" class="text-primaryLight mt-3 text-lg font-mono">0%</div>
+    <p class="text-slate-400 mt-4 text-sm max-w-md text-center">処理はすべてご利用の端末上で行われています。初回は言語データのダウンロードに数秒〜数十秒かかる場合があります。</p>
+  </div>
+
+  <!-- アプリケーションヘッダー -->
+  <header class="bg-white border-b border-slate-200 shadow-sm px-6 py-3 flex items-center justify-between shrink-0 z-10">
+    <div class="flex items-center gap-6">
+      
+      <!-- ファイル選択ボタン -->
+      <label class="cursor-pointer relative overflow-hidden group">
+        <div class="px-5 py-2.5 bg-primary text-white font-medium rounded shadow-sm group-hover:bg-primaryDark group-hover:shadow transition-all flex items-center gap-2">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          PDFを開く
         </div>
-    </header>
+        <input type="file" id="file-input" accept="application/pdf" class="hidden">
+      </label>
 
-    <main class="flex-grow flex flex-col items-center p-2 gap-2 overflow-hidden">
-        
-        <!-- 起動時の初期メッセージ -->
-        <div id="initial-message" class="flex flex-col items-center justify-center flex-grow w-full">
-            <div class="bg-surface p-8 rounded-lg shadow-material max-w-lg text-center border-t-4 border-primaryLight">
-                <svg class="w-16 h-16 text-primaryLight mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
-                <p class="text-xl text-primaryDark font-medium mb-3">セキュアなローカル処理</p>
-                <p class="text-sm text-gray-600 leading-relaxed text-left">
-                    読み込んだファイルは外部サーバーに送信されません。<br>
-                    すべてブラウザ内で処理されるので、テスト等にも安心して使用できます。
-                </p>
-            </div>
-        </div>
+      <!-- 縦書き/横書き トグル -->
+      <div class="flex bg-surfaceDark p-1 rounded-lg shadow-inner">
+        <label class="cursor-pointer">
+          <input type="radio" name="direction" value="horizontal" class="peer sr-only" checked>
+          <div class="px-4 py-1.5 text-sm font-medium rounded-md peer-checked:bg-white peer-checked:text-primary peer-checked:shadow-sm text-slate-500 hover:text-slate-700 transition-all">横書き</div>
+        </label>
+        <label class="cursor-pointer">
+          <input type="radio" name="direction" value="vertical" class="peer sr-only">
+          <div class="px-4 py-1.5 text-sm font-medium rounded-md peer-checked:bg-white peer-checked:text-primary peer-checked:shadow-sm text-slate-500 hover:text-slate-700 transition-all">縦書き</div>
+        </label>
+      </div>
 
-        <div id="controls" class="hidden flex flex-wrap gap-4 items-center bg-surface px-4 py-2 rounded shadow-material">
-            <button id="prev" class="bg-background hover:bg-gray-200 px-3 py-1 rounded transition-colors">前へ</button>
-            <span id="page-info" class="text-sm font-medium w-20 text-center">1 / 1</span>
-            <button id="next" class="bg-background hover:bg-gray-200 px-3 py-1 rounded transition-colors">次へ</button>
-            <div class="flex items-center gap-2 text-sm border-l pl-4 border-gray-200">
-                <span>縮小</span>
-                <input type="range" id="scale-slider" min="0.5" max="3.0" step="0.1" value="1.5" class="accent-primary">
-                <span>拡大</span>
-            </div>
-        </div>
-        
-        <div id="status" class="text-xs text-primary font-medium"></div>
-        
-        <div id="viewer-container" class="hidden flex-grow relative bg-white shadow-material rounded-lg overflow-auto w-full flex justify-center items-start">
-            <div id="canvas-wrapper" class="relative">
-                <canvas id="pdf-canvas"></canvas>
-                <div id="text-layer" class="textLayer"></div>
-            </div>
-        </div>
-    </main>
+    </div>
 
-    <script>
-        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-        let pdfDoc = null, pageNum = 1, renderTask = null;
-        let currentOcrLang = 'jpn'; // 初期値は横書き
-        
-        const canvas = document.getElementById('pdf-canvas'), ctx = canvas.getContext('2d');
-        const textLayer = document.getElementById('text-layer'), statusDiv = document.getElementById('status');
-        const container = document.getElementById('viewer-container');
-        const stopBtn = document.getElementById('stop-btn');
-        const scaleSlider = document.getElementById('scale-slider');
-        const initialMessage = document.getElementById('initial-message');
-        
-        const btnHorizontal = document.getElementById('mode-horizontal');
-        const btnVertical = document.getElementById('mode-vertical');
+    <div class="flex items-center gap-6">
+      <!-- ズームスライダー -->
+      <div class="flex items-center gap-3 bg-white px-3 py-1.5 rounded border border-slate-200">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM13 10H7" /></svg>
+        <input type="range" id="zoom-slider" min="0.3" max="3" step="0.05" value="1" class="w-32" title="表示サイズの変更">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" /></svg>
+      </div>
 
-        function updateModeButtons() {
-            if (currentOcrLang === 'jpn') {
-                btnHorizontal.className = 'px-3 py-1.5 text-sm font-medium rounded transition-colors bg-primary text-white';
-                btnVertical.className = 'px-3 py-1.5 text-sm font-medium rounded transition-colors text-primary hover:bg-gray-100';
-            } else {
-                btnVertical.className = 'px-3 py-1.5 text-sm font-medium rounded transition-colors bg-primary text-white';
-                btnHorizontal.className = 'px-3 py-1.5 text-sm font-medium rounded transition-colors text-primary hover:bg-gray-100';
-            }
+      <!-- 停止ボタン -->
+      <button id="stop-btn" class="px-5 py-2.5 bg-rose-50 border border-rose-200 text-rose-700 font-medium rounded shadow-sm hover:bg-rose-100 hover:border-rose-300 transition-all flex items-center gap-2 active:scale-95">
+        <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>
+        読み上げ停止
+      </button>
+    </div>
+  </header>
+
+  <!-- メインビューアエリア -->
+  <main class="flex-1 overflow-auto relative p-6 flex justify-center items-start" id="main-container">
+    <div id="viewer-wrapper" class="relative transition-transform duration-200 origin-top-left flex justify-center">
+      <!-- シャドウ付きのドキュメントコンテナ -->
+      <div id="document-container" class="relative bg-white shadow-xl ring-1 ring-slate-900/5">
+        <canvas id="pdf-canvas" class="block"></canvas>
+        <div id="highlight-layer" class="absolute inset-0 cursor-text select-none" style="pointer-events: auto;"></div>
+      </div>
+    </div>
+  </main>
+
+  <!-- 内部スクリプト -->
+  <script>
+    // --- PDF.js Setup ---
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+    // --- State Variables ---
+    let currentPdfPage = null;
+    let baseRenderScale = 2.0; // OCR精度を高めるため、内部的には高解像度でレンダリング
+    let currentCssScale = 1.0;
+    
+    // OCR結果を整形して保持する配列
+    // [{ text: "こんにちは", bbox: {x0,y0,x1,y1}, isParagraphStart: true }, ...]
+    let ocrWords = []; 
+    
+    // 現在読み上げ中の単語とDOMの紐付け
+    let utteranceWordMap = []; 
+
+    let tesseractWorker = null;
+    let currentTesseractLang = '';
+
+    // --- UI Helpers ---
+    function showLoading(text) {
+      document.getElementById('loading-text').innerText = text;
+      document.getElementById('loading-progress').innerText = '';
+      document.getElementById('loading-overlay').classList.remove('hidden');
+    }
+
+    function hideLoading() {
+      document.getElementById('loading-overlay').classList.add('hidden');
+    }
+
+    // --- Tesseract OCR Engine ---
+    async function getWorker(lang) {
+      if (tesseractWorker && currentTesseractLang === lang) {
+        return tesseractWorker;
+      }
+      if (tesseractWorker) {
+        await tesseractWorker.terminate();
+      }
+      
+      currentTesseractLang = lang;
+      tesseractWorker = await Tesseract.createWorker(lang, 1, {
+        logger: m => {
+          if (m.status === 'recognizing text') {
+            document.getElementById('loading-progress').innerText = `${Math.round(m.progress * 100)}%`;
+          } else {
+            // 初期化プロセスの詳細を隠し、分かりやすいメッセージに
+            document.getElementById('loading-progress').innerText = "AIモデルを準備中...";
+          }
         }
+      });
+      // PSM 3: Fully automatic page segmentation, but no OSD. (段組みを自動認識するデフォルト設定)
+      await tesseractWorker.setParameters({
+        tessedit_pageseg_mode: Tesseract.PSM.AUTO,
+      });
+      return tesseractWorker;
+    }
 
-        btnHorizontal.onclick = () => {
-            if (currentOcrLang !== 'jpn') {
-                currentOcrLang = 'jpn';
-                updateModeButtons();
-                if (pdfDoc) renderPage(pageNum);
-            }
-        };
+    async function processOCR(imageSrc, isVertical) {
+      showLoading("文書を解析中...");
+      const lang = isVertical ? 'jpn_vert' : 'jpn';
+      
+      try {
+        const worker = await getWorker(lang);
+        const { data } = await worker.recognize(imageSrc);
+        buildOcrWords(data);
+      } catch (error) {
+        console.error("OCR Error:", error);
+        alert("文字認識処理に失敗しました。");
+      } finally {
+        hideLoading();
+      }
+    }
 
-        btnVertical.onclick = () => {
-            if (currentOcrLang !== 'jpn_vert') {
-                currentOcrLang = 'jpn_vert';
-                updateModeButtons();
-                if (pdfDoc) renderPage(pageNum);
-            }
-        };
+    // OCR結果の構造から、使いやすいフラットな単語配列を作成する
+    // 要件: 段組み考慮、不自然な改行の結合
+    function buildOcrWords(ocrData) {
+      ocrWords = [];
+      if (!ocrData || !ocrData.blocks) return;
 
-        async function renderPage(num) {
-            if (!pdfDoc || num < 1 || num > pdfDoc.numPages) return;
-
-            statusDiv.textContent = `ページ ${num} をレンダリング中...`;
-            const page = await pdfDoc.getPage(num);
-            const scale = parseFloat(scaleSlider.value);
-            
-            const viewport = page.getViewport({ scale: scale });
-            canvas.height = viewport.height;
-            canvas.width = viewport.width;
-
-            if (renderTask) {
-                renderTask.cancel();
-            }
-
-            renderTask = page.render({ canvasContext: ctx, viewport: viewport });
-            
-            try {
-                await renderTask.promise;
-            } catch (err) {
-                if (err.name === 'RenderingCancelledException') return;
-                throw err;
-            }
-
-            statusDiv.textContent = currentOcrLang === 'jpn' ? "OCR文字認識中... (段組みを解析中)" : "OCR文字認識中... (縦書き 初回はデータDLに時間がかかります)";
-            const dataUrl = canvas.toDataURL('image/jpeg');
-            
-            const worker = await Tesseract.createWorker(currentOcrLang);
-            await worker.setParameters({
-                tessedit_pageseg_mode: currentOcrLang === 'jpn_vert' ? '5' : '3'
-            });
-            const result = await worker.recognize(dataUrl);
-            await worker.terminate();
-
-            let orderedLines = [];
-
-            if (currentOcrLang === 'jpn') {
-                // 横書きの場合：Tesseractのブロック解析機能を利用し、段組み構造(左列→右列など)を維持する
-                if (result.data.blocks) {
-                    result.data.blocks.forEach(block => {
-                        block.paragraphs.forEach(para => {
-                            para.lines.forEach(line => {
-                                orderedLines.push(line);
-                            });
-                        });
-                    });
-                } else {
-                    orderedLines = result.data.lines;
-                }
-            } else {
-                // 縦書きの場合：Y座標の差分をもとに、上下の段組みを自前で判別して並べ替える
-                orderedLines = result.data.lines.slice();
-                const yThreshold = canvas.height * 0.25; // 画面の1/4以上離れていれば別段とみなす
-                orderedLines.sort((a, b) => {
-                    if (Math.abs(b.bbox.y0 - a.bbox.y0) > yThreshold) {
-                        return a.bbox.y0 - b.bbox.y0; // 上段を先に
-                    }
-                    return b.bbox.x1 - a.bbox.x1; // 同じ段なら右から左へ
+      // PSM:AUTOにより、blocksは段組みを考慮した人間が読む順序で配列されている
+      ocrData.blocks.forEach(block => {
+        block.paragraphs.forEach(para => {
+          let isParaStart = true;
+          para.lines.forEach(line => {
+            line.words.forEach(word => {
+              // 日本語における不要な空白を除去
+              // 要件「文の途中で改行されている場合は修正する」にも寄与
+              let cleanText = word.text.replace(/\s+/g, '');
+              
+              if (cleanText.length > 0) {
+                ocrWords.push({
+                  text: cleanText,
+                  bbox: word.bbox,
+                  isParagraphStart: isParaStart // 段落の先頭（改行や段落の始まり）をマーク
                 });
-            }
-
-            textLayer.innerHTML = '';
-            orderedLines.forEach((line, index) => {
-                if (!line.text.trim()) return;
-
-                const span = document.createElement('span');
-                const bbox = line.bbox;
-                span.style.left = bbox.x0 + 'px';
-                span.style.top = bbox.y0 + 'px';
-                span.style.width = (bbox.x1 - bbox.x0) + 'px';
-                span.style.height = (bbox.y1 - bbox.y0) + 'px';
-                span.style.cursor = currentOcrLang === 'jpn_vert' ? 'vertical-text' : 'text';
-                
-                span.onclick = (e) => {
-                    e.stopPropagation();
-                    const textToRead = extractSentence(index, orderedLines);
-                    window.speechSynthesis.cancel();
-                    const utterance = new SpeechSynthesisUtterance(textToRead);
-                    utterance.lang = 'ja-JP';
-                    utterance.onstart = () => stopBtn.classList.remove('hidden');
-                    utterance.onend = () => stopBtn.classList.add('hidden');
-                    window.speechSynthesis.speak(utterance);
-                };
-                textLayer.appendChild(span);
+                isParaStart = false; 
+              }
             });
-            statusDiv.textContent = `ページ ${num} 完了`;
-            document.getElementById('page-info').textContent = `${pageNum} / ${pdfDoc.numPages}`;
-        }
-
-        function extractSentence(clickedIndex, allLines) {
-            let fullText = "";
-            let clickPosStart = 0;
-            
-            for(let i = 0; i < allLines.length; i++) {
-                // 日本語文字間に入った不自然なスペースを詰める（改行由来の分断を修正）
-                let text = allLines[i].text.replace(/([ぁ-んァ-ヶー一-龠])\s+([ぁ-んァ-ヶー一-龠])/g, '$1$2').trim();
-                
-                if (!text) continue;
-
-                // クリックした行が、連結された全文のどの位置から始まるかを記録
-                if (i === clickedIndex) {
-                    clickPosStart = fullText.length;
-                }
-                fullText += text;
-            }
-
-            // クリックした場所から前に遡って、前の文の終わり（句点）を探す
-            let startPos = 0;
-            for (let i = clickPosStart - 1; i >= 0; i--) {
-                if (/[。．！？!?]/.test(fullText[i])) {
-                    startPos = i + 1; // 句点の次の文字が、現在の文の先頭
-                    break;
-                }
-            }
-            
-            // クリックした場所から後ろに進んで、現在の文の終わり（句点）を探す
-            let endPos = fullText.length;
-            for (let i = clickPosStart; i < fullText.length; i++) {
-                if (/[。．！？!?]/.test(fullText[i])) {
-                    endPos = i + 1; // 句点を含める
-                    break;
-                }
-            }
-            
-            // 文の先頭から句点までを抽出して返す
-            return fullText.substring(startPos, endPos).trim();
-        }
-
-        stopBtn.onclick = () => {
-            window.speechSynthesis.cancel();
-            stopBtn.classList.add('hidden');
-        };
-
-        scaleSlider.addEventListener('input', () => {
-            if (pdfDoc) renderPage(pageNum);
+          });
         });
+      });
+      console.log("Extracted words:", ocrWords.length);
+    }
 
-        document.getElementById('file-input').addEventListener('change', async (e) => {
-            const file = e.target.files[0];
-            if(!file) return;
-            
-            initialMessage.classList.add('hidden');
-            
-            const pdf = await pdfjsLib.getDocument(await file.arrayBuffer()).promise;
-            pdfDoc = pdf;
-            pageNum = 1;
-            container.classList.remove('hidden');
-            document.getElementById('controls').classList.remove('hidden');
-            renderPage(pageNum);
+    // --- PDF Rendering & Zoom ---
+    async function renderPdfPage(page) {
+      currentPdfPage = page;
+      const viewport = page.getViewport({ scale: baseRenderScale });
+      
+      const canvas = document.getElementById('pdf-canvas');
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      
+      const highlightLayer = document.getElementById('highlight-layer');
+      highlightLayer.style.width = viewport.width + 'px';
+      highlightLayer.style.height = viewport.height + 'px';
+
+      await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+      
+      // 初回表示時にウィンドウサイズに合わせる
+      fitToContainer();
+      
+      // レンダリング完了後、キャンバス画像からOCRを実行
+      const isVertical = document.querySelector('input[name="direction"]:checked').value === 'vertical';
+      await processOCR(canvas.toDataURL('image/png'), isVertical);
+    }
+
+    function fitToContainer() {
+      const container = document.getElementById('main-container');
+      const canvas = document.getElementById('pdf-canvas');
+      
+      const availableWidth = container.clientWidth - 48; // padding分
+      const availableHeight = container.clientHeight - 48;
+      
+      const scaleX = availableWidth / canvas.width;
+      const scaleY = availableHeight / canvas.height;
+      
+      // 画面に収まるようにしつつ、最大で元のPDFの等倍(baseRenderScale換算)まで
+      currentCssScale = Math.min(scaleX, scaleY, 1.0 / (baseRenderScale / 1.5));
+      
+      document.getElementById('zoom-slider').value = currentCssScale;
+      applyZoom();
+    }
+
+    function applyZoom() {
+      const wrapper = document.getElementById('viewer-wrapper');
+      // CSS Transformを用いて、高解像度のCanvasを縮小・拡大表示する。再レンダリング不要で高速。
+      wrapper.style.transform = `scale(${currentCssScale})`;
+    }
+
+    // --- Interaction & Sentence Extraction ---
+    
+    // 文字列の末尾が文の区切り（句点等）か判定
+    function hasSentenceEndMark(text) {
+      return /[。．！？\.\?\!]$/.test(text);
+    }
+    // 文字列内に文の区切りが含まれているか判定
+    function containsSentenceEndMark(text) {
+      return /[。．！？\.\?\!]/.test(text);
+    }
+
+    // 座標から最も近い単語のインデックスを探す
+    function findWordIndexAtPosition(x, y) {
+      // 1. 完全に座標を内包しているものを探す
+      for (let i = 0; i < ocrWords.length; i++) {
+        const b = ocrWords[i].bbox;
+        if (x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1) {
+          return i;
+        }
+      }
+      
+      // 2. 見つからなければ、閾値内で最も近いものを探す（行間のクリック対策）
+      let minDist = Infinity;
+      let closestIdx = -1;
+      const threshold = 60; // px
+      
+      for (let i = 0; i < ocrWords.length; i++) {
+        const b = ocrWords[i].bbox;
+        // バウンディングボックスの中心点
+        const cx = (b.x0 + b.x1) / 2;
+        const cy = (b.y0 + b.y1) / 2;
+        const dist = Math.sqrt(Math.pow(cx - x, 2) + Math.pow(cy - y, 2));
+        
+        if (dist < minDist && dist < threshold) {
+          minDist = dist;
+          closestIdx = i;
+        }
+      }
+      return closestIdx;
+    }
+
+    // 指定したインデックスを含む「文」を抽出する
+    // 要件: 改行や段落も考慮して先頭を探す、句点までを読み上げる
+    function extractSentenceWords(startIndex) {
+      let start = startIndex;
+      let end = startIndex;
+
+      // 前方検索: 文章の始まりを探す
+      for (let i = startIndex; i >= 0; i--) {
+        // 段落の先頭（見出し等）であれば、そこが文の始まり
+        if (ocrWords[i].isParagraphStart && i !== startIndex) {
+          start = i;
+          break;
+        }
+        // 前の単語に句点が含まれていれば、現在の単語が文の始まり
+        if (i > 0 && containsSentenceEndMark(ocrWords[i-1].text)) {
+          start = i;
+          break;
+        }
+        start = i;
+      }
+
+      // 後方検索: 句点を探す
+      for (let i = startIndex; i < ocrWords.length; i++) {
+        end = i;
+        // 現在の単語に句点が含まれていれば、そこが文の終わり
+        if (containsSentenceEndMark(ocrWords[i].text)) {
+          break;
+        }
+        // 次の単語が新しい段落の始まりなら、ここで文が終わるとみなす
+        if (i < ocrWords.length - 1 && ocrWords[i+1].isParagraphStart) {
+          break;
+        }
+      }
+
+      return ocrWords.slice(start, end + 1);
+    }
+
+    // --- Text to Speech & Highlighting ---
+    
+    function clearHighlights() {
+      document.getElementById('highlight-layer').innerHTML = '';
+      utteranceWordMap = [];
+    }
+
+    // 読み上げる文全体を薄くハイライトし、文字位置のマッピングを作成する
+    function setupHighlights(words) {
+      clearHighlights();
+      const layer = document.getElementById('highlight-layer');
+      let currentCharIndex = 0;
+
+      words.forEach(word => {
+        const textLen = word.text.length;
+        
+        // ハイライト用DOM要素作成
+        const div = document.createElement('div');
+        div.style.position = 'absolute';
+        div.style.left = word.bbox.x0 + 'px';
+        div.style.top = word.bbox.y0 + 'px';
+        div.style.width = (word.bbox.x1 - word.bbox.x0) + 'px';
+        div.style.height = (word.bbox.y1 - word.bbox.y0) + 'px';
+        
+        // デフォルトスタイル（薄い黄色）
+        div.className = 'bg-amber-300 bg-opacity-20 border-b border-amber-400 pointer-events-none transition-colors duration-150';
+        layer.appendChild(div);
+        
+        utteranceWordMap.push({
+          word: word,
+          startChar: currentCharIndex,
+          endChar: currentCharIndex + textLen,
+          element: div
         });
+        
+        currentCharIndex += textLen;
+      });
+    }
 
-        document.getElementById('prev').onclick = () => { if(pageNum > 1) renderPage(--pageNum); };
-        document.getElementById('next').onclick = () => { if(pageNum < pdfDoc.numPages) renderPage(++pageNum); };
-    </script>
+    // 音声読み上げの進行に合わせて、該当箇所を強調表示する（文節ハイライト要件）
+    function updateHighlightProgress(charIndex) {
+      utteranceWordMap.forEach(item => {
+        if (charIndex >= item.startChar && charIndex < item.endChar) {
+          // 読み上げ中の単語（濃いオレンジ）
+          item.element.className = 'absolute bg-orange-500 bg-opacity-40 border-b-2 border-orange-600 pointer-events-none shadow-sm transition-colors duration-100 scale-105';
+          item.element.style.zIndex = '10';
+        } else {
+          // それ以外はデフォルトに戻す
+          item.element.className = 'absolute bg-amber-300 bg-opacity-20 border-b border-amber-400 pointer-events-none transition-colors duration-150';
+          item.element.style.zIndex = '1';
+        }
+      });
+    }
+
+    function speakText(words) {
+      window.speechSynthesis.cancel(); // 既存の読み上げを停止
+      
+      const fullText = words.map(w => w.text).join('');
+      if (!fullText) return;
+
+      setupHighlights(words);
+
+      const utterance = new SpeechSynthesisUtterance(fullText);
+      utterance.lang = 'ja-JP';
+      utterance.rate = 1.0;
+
+      // 文節や単語の境界で発火するイベント
+      utterance.onboundary = (event) => {
+        if (event.name === 'word' || event.name === 'sentence') {
+          updateHighlightProgress(event.charIndex);
+        }
+      };
+
+      utterance.onend = () => {
+        clearHighlights();
+      };
+      
+      utterance.onerror = (e) => {
+        if (e.error !== 'canceled') {
+          console.error('Speech API Error:', e);
+          clearHighlights();
+        }
+      };
+
+      window.speechSynthesis.speak(utterance);
+    }
+
+    // --- Event Listeners ---
+
+    // ファイル入力
+    document.getElementById('file-input').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      
+      showLoading("PDFファイルを展開中...");
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        
+        // 最初のページを取得してレンダリング
+        const page = await pdfDoc.getPage(1);
+        await renderPdfPage(page);
+      } catch (error) {
+        console.error(error);
+        alert("PDFの読み込みに失敗しました。パスワード保護などがかかっていないか確認してください。");
+        hideLoading();
+      }
+    });
+
+    // 方向トグル切替 (縦書き/横書き)
+    document.querySelectorAll('input[name="direction"]').forEach(radio => {
+      radio.addEventListener('change', async (e) => {
+        if (currentPdfPage && document.getElementById('pdf-canvas').width > 0) {
+          const isVertical = e.target.value === 'vertical';
+          const canvas = document.getElementById('pdf-canvas');
+          // モードが切り替わったら、現在の表示画像のまま言語モデルを切り替えて再OCR
+          await processOCR(canvas.toDataURL('image/png'), isVertical);
+        }
+      });
+    });
+
+    // ズームスライダー
+    document.getElementById('zoom-slider').addEventListener('input', (e) => {
+      currentCssScale = parseFloat(e.target.value);
+      applyZoom();
+    });
+
+    // 停止ボタン
+    document.getElementById('stop-btn').addEventListener('click', () => {
+      window.speechSynthesis.cancel();
+      clearHighlights();
+    });
+
+    // クリック位置の判定と読み上げトリガー
+    document.getElementById('highlight-layer').addEventListener('click', (e) => {
+      if (ocrWords.length === 0) return;
+
+      // e.offsetX / e.offsetY は highlight-layer (絶対配置の親コンテナ) に対する座標。
+      // CSSの scale がかかっていても、この値は要素本来のサイズ（Canvas生成時の解像度）に基づくため、
+      // OCRで取得したバウンディングボックスの座標と直接比較が可能。
+      const x = e.offsetX;
+      const y = e.offsetY;
+
+      const clickedIndex = findWordIndexAtPosition(x, y);
+      if (clickedIndex !== -1) {
+        const sentenceWords = extractSentenceWords(clickedIndex);
+        speakText(sentenceWords);
+      }
+    });
+
+    // ウィンドウリサイズ時に中央配置を維持するためコンテナサイズ再計算(必要に応じて)
+    window.addEventListener('resize', () => {
+      // 画面サイズ変更時、既に表示されていればフィットさせ直すことも可能だが
+      // ユーザがズームしている可能性もあるので今回は省略。
+    });
+
+  </script>
 </body>
 </html>
