@@ -107,9 +107,9 @@
       <label class="cursor-pointer relative overflow-hidden group">
         <div class="px-5 py-2.5 bg-primary text-white font-medium rounded shadow-sm group-hover:bg-primaryDark group-hover:shadow transition-all flex items-center gap-2">
           <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-          PDFを開く
+          PDFや画像を開く
         </div>
-        <input type="file" id="file-input" accept="application/pdf" class="hidden">
+        <input type="file" id="file-input" accept="application/pdf, image/*" class="hidden">
       </label>
 
       <!-- 縦書き/横書き トグル -->
@@ -143,10 +143,10 @@
   </header>
 
   <!-- メインビューアエリア -->
-  <main class="flex-1 overflow-auto relative p-6 flex justify-center items-start" id="main-container">
-    <div id="viewer-wrapper" class="relative transition-transform duration-200 origin-top-left flex justify-center">
+  <main class="flex-1 overflow-auto relative p-6 flex" id="main-container">
+    <div id="viewer-wrapper" class="m-auto relative">
       <!-- シャドウ付きのドキュメントコンテナ -->
-      <div id="document-container" class="relative bg-white shadow-xl ring-1 ring-slate-900/5">
+      <div id="document-container" class="relative bg-white shadow-xl ring-1 ring-slate-900/5 origin-top-left transition-transform duration-200">
         <canvas id="pdf-canvas" class="block"></canvas>
         <div id="highlight-layer" class="absolute inset-0 cursor-text select-none" style="pointer-events: auto;"></div>
       </div>
@@ -160,6 +160,7 @@
 
     // --- State Variables ---
     let currentPdfPage = null;
+    let isDocumentLoaded = false;
     let baseRenderScale = 2.0; // OCR精度を高めるため、内部的には高解像度でレンダリング
     let currentCssScale = 1.0;
     
@@ -275,10 +276,33 @@
 
       await page.render({ canvasContext: ctx, viewport: viewport }).promise;
       
+      isDocumentLoaded = true;
+
       // 初回表示時にウィンドウサイズに合わせる
       fitToContainer();
       
       // レンダリング完了後、キャンバス画像からOCRを実行
+      const isVertical = document.querySelector('input[name="direction"]:checked').value === 'vertical';
+      await processOCR(canvas.toDataURL('image/png'), isVertical);
+    }
+
+    async function renderImagePage(img) {
+      const canvas = document.getElementById('pdf-canvas');
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      
+      canvas.width = img.width;
+      canvas.height = img.height;
+      
+      const highlightLayer = document.getElementById('highlight-layer');
+      highlightLayer.style.width = img.width + 'px';
+      highlightLayer.style.height = img.height + 'px';
+      
+      ctx.drawImage(img, 0, 0);
+      
+      isDocumentLoaded = true;
+
+      fitToContainer();
+      
       const isVertical = document.querySelector('input[name="direction"]:checked').value === 'vertical';
       await processOCR(canvas.toDataURL('image/png'), isVertical);
     }
@@ -293,17 +317,30 @@
       const scaleX = availableWidth / canvas.width;
       const scaleY = availableHeight / canvas.height;
       
-      // 画面に収まるようにしつつ、最大で元のPDFの等倍(baseRenderScale換算)まで
-      currentCssScale = Math.min(scaleX, scaleY, 1.0 / (baseRenderScale / 1.5));
+      // 画面に収まるようにウィンドウいっぱいのスケールを採用
+      currentCssScale = Math.min(scaleX, scaleY);
+      
+      // 必要に応じてスライダーの最大値を自動拡張する
+      const slider = document.getElementById('zoom-slider');
+      if (currentCssScale > parseFloat(slider.max)) {
+        slider.max = Math.ceil(currentCssScale * 1.5);
+      }
       
       document.getElementById('zoom-slider').value = currentCssScale;
       applyZoom();
     }
 
     function applyZoom() {
+      const canvas = document.getElementById('pdf-canvas');
       const wrapper = document.getElementById('viewer-wrapper');
-      // CSS Transformを用いて、高解像度のCanvasを縮小・拡大表示する。再レンダリング不要で高速。
-      wrapper.style.transform = `scale(${currentCssScale})`;
+      const container = document.getElementById('document-container');
+      
+      // レイアウト上の占有サイズを更新（スクロール領域の確保と中央配置のため）
+      wrapper.style.width = (canvas.width * currentCssScale) + 'px';
+      wrapper.style.height = (canvas.height * currentCssScale) + 'px';
+      
+      // 実際の表示の拡大縮小
+      container.style.transform = `scale(${currentCssScale})`;
     }
 
     // --- Interaction & Sentence Extraction ---
@@ -478,25 +515,42 @@
       const file = e.target.files[0];
       if (!file) return;
       
-      showLoading("PDFファイルを展開中...");
-      try {
-        const arrayBuffer = await file.arrayBuffer();
-        const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-        
-        // 最初のページを取得してレンダリング
-        const page = await pdfDoc.getPage(1);
-        await renderPdfPage(page);
-      } catch (error) {
-        console.error(error);
-        alert("PDFの読み込みに失敗しました。パスワード保護などがかかっていないか確認してください。");
-        hideLoading();
+      if (file.type === 'application/pdf') {
+        showLoading("PDFファイルを展開中...");
+        try {
+          const arrayBuffer = await file.arrayBuffer();
+          const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+          
+          // 最初のページを取得してレンダリング
+          const page = await pdfDoc.getPage(1);
+          await renderPdfPage(page);
+        } catch (error) {
+          console.error(error);
+          alert("PDFの読み込みに失敗しました。パスワード保護などがかかっていないか確認してください。");
+          hideLoading();
+        }
+      } else if (file.type.startsWith('image/')) {
+        showLoading("画像を読み込み中...");
+        const img = new Image();
+        const objectUrl = URL.createObjectURL(file);
+        img.onload = async () => {
+          URL.revokeObjectURL(objectUrl);
+          await renderImagePage(img);
+        };
+        img.onerror = () => {
+          alert("画像の読み込みに失敗しました。");
+          hideLoading();
+        };
+        img.src = objectUrl;
+      } else {
+        alert("対応していないファイル形式です。PDFか画像ファイルを選択してください。");
       }
     });
 
     // 方向トグル切替 (縦書き/横書き)
     document.querySelectorAll('input[name="direction"]').forEach(radio => {
       radio.addEventListener('change', async (e) => {
-        if (currentPdfPage && document.getElementById('pdf-canvas').width > 0) {
+        if (isDocumentLoaded && document.getElementById('pdf-canvas').width > 0) {
           const isVertical = e.target.value === 'vertical';
           const canvas = document.getElementById('pdf-canvas');
           // モードが切り替わったら、現在の表示画像のまま言語モデルを切り替えて再OCR
