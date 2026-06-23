@@ -124,6 +124,17 @@
         </label>
       </div>
 
+      <!-- ページネーション (新規) -->
+      <div id="pagination-controls" class="hidden flex items-center gap-2 bg-white px-2 py-1.5 rounded border border-slate-200">
+        <button id="prev-page-btn" class="p-1 text-slate-600 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-all" disabled>
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd" /></svg>
+        </button>
+        <span class="text-sm font-medium w-16 text-center text-slate-600"><span id="page-num">1</span> / <span id="page-count">-</span></span>
+        <button id="next-page-btn" class="p-1 text-slate-600 rounded hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-all" disabled>
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" /></svg>
+        </button>
+      </div>
+
     </div>
 
     <div class="flex items-center gap-6">
@@ -159,6 +170,8 @@
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
     // --- State Variables ---
+    let currentPdfDoc = null;
+    let currentPageNumber = 1;
     let currentPdfPage = null;
     let isDocumentLoaded = false;
     let baseRenderScale = 2.0; // OCR精度を高めるため、内部的には高解像度でレンダリング
@@ -519,17 +532,21 @@
         showLoading("PDFファイルを展開中...");
         try {
           const arrayBuffer = await file.arrayBuffer();
-          const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+          currentPdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
           
-          // 最初のページを取得してレンダリング
-          const page = await pdfDoc.getPage(1);
-          await renderPdfPage(page);
+          document.getElementById('pagination-controls').classList.remove('hidden');
+          document.getElementById('page-count').textContent = currentPdfDoc.numPages;
+          
+          await loadPage(1);
         } catch (error) {
           console.error(error);
           alert("PDFの読み込みに失敗しました。パスワード保護などがかかっていないか確認してください。");
           hideLoading();
         }
       } else if (file.type.startsWith('image/')) {
+        document.getElementById('pagination-controls').classList.add('hidden');
+        currentPdfDoc = null;
+        
         showLoading("画像を読み込み中...");
         const img = new Image();
         const objectUrl = URL.createObjectURL(file);
@@ -544,6 +561,44 @@
         img.src = objectUrl;
       } else {
         alert("対応していないファイル形式です。PDFか画像ファイルを選択してください。");
+      }
+    });
+
+    async function loadPage(pageNum) {
+      if (!currentPdfDoc) return;
+      if (pageNum < 1 || pageNum > currentPdfDoc.numPages) return;
+      
+      // ページを移動する前に読み上げとハイライトをリセット
+      window.speechSynthesis.cancel();
+      clearHighlights();
+
+      currentPageNumber = pageNum;
+      document.getElementById('page-num').textContent = currentPageNumber;
+      
+      document.getElementById('prev-page-btn').disabled = currentPageNumber <= 1;
+      document.getElementById('next-page-btn').disabled = currentPageNumber >= currentPdfDoc.numPages;
+      
+      showLoading(`ページ ${pageNum} を展開中...`);
+      try {
+        const page = await currentPdfDoc.getPage(pageNum);
+        await renderPdfPage(page);
+      } catch (error) {
+        console.error(error);
+        alert("ページの読み込みに失敗しました。");
+        hideLoading();
+      }
+    }
+
+    // ページ移動イベント
+    document.getElementById('prev-page-btn').addEventListener('click', () => {
+      if (currentPageNumber > 1) {
+        loadPage(currentPageNumber - 1);
+      }
+    });
+
+    document.getElementById('next-page-btn').addEventListener('click', () => {
+      if (currentPdfDoc && currentPageNumber < currentPdfDoc.numPages) {
+        loadPage(currentPageNumber + 1);
       }
     });
 
